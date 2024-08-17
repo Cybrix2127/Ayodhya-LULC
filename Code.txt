@@ -1,0 +1,70 @@
+//Shape File is imported first.
+
+var s2 = ee.ImageCollection("COPERNICUS/S2_SR")
+
+Map.addLayer(ROI)
+Map.centerObject(ROI, 10)
+
+var filtered = s2.filter(ee.Filter.bounds(ROI))
+                .filter(ee.Filter.date('2018-12-01', '2019-02-28'))
+                .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 1))
+                .select('B.*')
+                
+var before = filtered.median().clip(ROI)
+
+Map.addLayer(before, imageVisParam, 'before')
+
+var after = s2.filter(ee.Filter.bounds(ROI))
+                .filter(ee.Filter.date('2022-12-01', '2023-02-28'))
+                .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 1))
+                .select('B.*')
+                .median()
+                .clip(ROI)
+                
+Map.addLayer(after, imageVisParam2, 'after')
+
+var training = Urban.merge(Bareland).merge(Waterbody).merge(Vegetation)
+
+var training = before.sampleRegions({
+    collection:training,
+    properties:['Class'],
+    scale: 10})
+  
+print(training)
+
+var classifier = ee.Classifier.smileRandomForest(50).train({
+  features:training,
+  classProperty: 'Class',
+  inputProperties:before.bandNames()})
+  
+var beforeClassified = before.classify(classifier)
+
+Map.addLayer(beforeClassified, {min: 0, max: 3, palette: ['yellow', 'grey', 'blue', 'green']}, 'Before Classified')
+
+var training_after = Urban_after.merge(Bareland_after).merge(Waterbody_after).merge(Vegetation_after)
+
+var training_after = after.sampleRegions({
+    collection:training_after,
+    properties:['Class'],
+    scale: 10})
+    
+print(training_after)
+
+var classifier_after = ee.Classifier.smileRandomForest(50).train({
+  features:training_after,
+  classProperty: 'Class',
+  inputProperties:after.bandNames()})
+
+var afterClassified = after.classify(classifier_after)
+Map.addLayer(afterClassified, {min: 0, max: 3, palette: ['yellow', 'grey', 'blue', 'green']}, 'After Classified')
+
+
+// Change Detection
+
+var beforeClasses = beforeClassified.remap([0, 1, 2, 3], [1, 2, 3, 4])
+var afterClasses = afterClassified.remap([0, 1, 2, 3], [1, 2, 3, 4])
+
+// show all change areas
+
+var change = afterClasses.subtract(beforeClasses).neq(0)
+Map.addLayer(change, {min: 0, max: 1, palette: ['white', 'red']}, 'Change')
